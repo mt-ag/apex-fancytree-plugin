@@ -1,6 +1,6 @@
 {
   "name" : "FancyTree Plug-In",
-  "version" : "1.1.0",
+  "version" : "1.0.0",
   "description" : "Region Plugin to show data in a tree structure using a SQL query.",
   "keywords" : ["FancyTree","tree"],
   "homepage" : "https://github.com/mt-ag/apex-fancytree-plugin",
