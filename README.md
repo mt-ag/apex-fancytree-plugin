@@ -1,5 +1,6 @@
 # Oracle APEX Region Plug-In - MT APEX FancyTree
 A region plug-in that shows data in a tree format based on a SQL query.
+It features functionality like drag-and-drop, a right-click menu, checkboxes, grid display and a possibility for master-detail trees. See the demo for some samples of these functionalities.
 
 ## Install
 
