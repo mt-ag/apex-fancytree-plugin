@@ -1,7 +1,7 @@
 {
   "name" : "FancyTree Plug-In",
   "version" : "1.0.0",
-  "description" : "Region Plugin to show data in a tree structure using a SQL query.",
+  "description" : "Region Plugin to show data in a tree structure using a SQL query. It features functionality like drag-and-drop, a right-click menu, checkboxes, grid display and a possibility for master-detail trees.",
   "keywords" : ["FancyTree","tree"],
   "homepage" : "https://github.com/mt-ag/apex-fancytree-plugin",
   "bugs" : {
