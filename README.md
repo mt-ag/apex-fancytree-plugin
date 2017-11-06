@@ -29,3 +29,6 @@ order siblings by ename
 ## Demo
 [https://apex.mt-ag.com/apex/f?p=140](https://apex.mt-ag.com/apex/f?p=140)
 
+## Preview
+## ![](https://github.com/mt-ag/apex-fancytree-plugin/blob/master/preview.png)
+
