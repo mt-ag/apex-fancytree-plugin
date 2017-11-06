@@ -1,0 +1,33 @@
+{
+  "name" : "FancyTree Plug-In",
+  "version" : "1.1.0",
+  "description" : "Region Plugin to show data in a tree structure using a SQL query.",
+  "keywords" : ["FancyTree","tree"],
+  "homepage" : "https://github.com/mt-ag/apex-fancytree-plugin",
+  "bugs" : {
+    "url" : "https://github.com/mt-ag/apex-fancytree-plugin/issues",
+    "email" : "alexander.warkus@mt-ag.com"
+  },
+  "license" : "MIT",
+  "author" : {
+    "name" : "Alexander Warkus",
+    "email" : "alexander.warkus@mt-ag.com",
+    "url" : "http://www.mt-ag.com",
+  },
+  "repository" : {
+    "type" : "git",
+    "url" : "https://github.com/mt-ag/apex-fancytree-plugin.git"
+  },
+  "oracle" : {
+    "versions" : ["11.2.0.1", "12.1.0.1", "12.2.0.1"],
+    "apex" : {
+      "versions" : ["5.1.0","5.1.1","5.1.2","5.1.3"],
+      "plugin" : {
+        "internalName" : "COM.MTAG.APEX.FANCYTREEV1.1",
+        "type" : "region",
+        "demo" : "https://apex.mt-ag.com/apex/f?p=140",
+        "previewImage" : "https://github.com/mt-ag/apex-fancytree-plugin/raw/master/preview.png"
+      }
+    }
+  }
+}
