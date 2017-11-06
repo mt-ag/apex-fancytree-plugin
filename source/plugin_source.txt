@@ -1,0 +1,604 @@
+FUNCTION tree_render (
+    p_region                IN apex_plugin.t_region,
+    p_plugin                IN apex_plugin.t_plugin,
+    p_is_printer_friendly   IN BOOLEAN
+) RETURN apex_plugin.t_region_render_result IS
+l_html CLOB;
+l_stmt varchar2(32767);
+TYPE mycursor_type IS REF CURSOR;
+mycur mycursor_type;
+TYPE rec IS RECORD (value varchar2(50),
+                         name VARCHAR2(2000),
+                         tooltip VARCHAR2(100),
+                         icon VARCHAR2(100),
+                         link VARCHAR2(100),
+                         lvl number,
+                         parent_id varchar2(2000),
+                         custom1 VARCHAR2(100),
+                         custom2 VARCHAR2(100),
+                         custom3 VARCHAR2(100),
+                         custom4 VARCHAR2(100),
+                         custom5 VARCHAR2(100),
+                         custom6 VARCHAR2(100),
+                         custom7 VARCHAR2(100),
+                         custom8 VARCHAR2(100),
+                         custom9 VARCHAR2(100)
+                         );
+l_mytype rec;
+l_tree varchar2(32767);
+l_menu varchar2(32767);
+l_thing_to_execute varchar2(32767);
+regionid varchar2(200);
+n pls_integer;
+l_json CLOB;
+l_ext varchar2(60);
+TYPE col IS RECORD( name VARCHAR2(200));
+l_column_name col;
+v_cursor_id integer;
+v_col_cnt integer;
+v_columns dbms_sql.desc_tab;
+number_of_rows pls_integer;
+BEGIN   
+    -- get sql query from sql source
+    l_stmt := p_region.source;
+    
+    -- get the static id
+    select static_id into regionid from apex_application_page_regions where region_name = p_region.name AND application_id = :APP_ID AND page_id = :APP_PAGE_ID and rownum=1;
+    -- if no static id is set, generate random
+    if regionid is null then
+        n := dbms_random.value(1,10000);
+        regionid := regionid + n;
+    end if;
+    -- render radiobuttons
+    if p_region.attribute_18 = 'Y' then
+        sys.htp.p('<input type="radio" id="em' || regionid || '" name="mode' || regionid || '" value="Edit" checked >Edit Mode </input>');
+        sys.htp.p('<input type="radio" id="vm' || regionid || '" name="mode' || regionid || '" value="View" >View Mode<br>');
+    end if;
+    
+    -- add search and exp/coll buttons
+    if p_region.attribute_21 = 'Y' then
+        sys.htp.p('<input name="search' || regionid || '" placeholder="Filter..." onkeypress="return event.keyCode!=13">
+                   <button type="button" id="btnResetSearch' || regionid || '" class="t-Button t-Button--noLabel t-Button--icon"><span aria-hidden="true" class="t-Icon fa fa-eraser"></button>
+                   <span id="matches' || regionid || '"></span>');
+    end if; 
+    
+    if p_region.attribute_19 = 'Y' then
+        sys.htp.p('<button type="button" id="expand' || regionid || '" class="t-Button">Expand All</button>
+                   <button type="button" id="collapse' || regionid || '" class="t-Button">Collapse All</button>');
+        -- add func for buttons
+        apex_javascript.add_inline_code('function openNode(node) {
+                                            //check if node is loaded.
+                                            if (node.isUndefined()) {
+                                                //load if not loaded
+                                                node.load().done(function() {
+                                                    //visit all children and call this function recursively
+                                                    node.visit(function(c) {
+                                                        openNode(c);
+                                                    });
+                                                    //expand this node
+                                                    node.setExpanded(true);
+                                                });
+                                            } else {
+                                                node.visit(function(c) {
+                                                    openNode(c);
+                                                });
+                                                node.setExpanded(true);
+                                            }
+                                        }');
+        apex_javascript.add_inline_code('$("button#expand' || regionid || '").click(function(e){
+                                            $("#tree' || regionid || '").fancytree("getTree").getRootNode().getChildren().forEach(function (n) {
+                                                openNode(n);
+                                            });
+                                           });');
+        apex_javascript.add_inline_code('$("button#collapse' || regionid || '").click(function(e){
+                                       $("#tree' || regionid || '").fancytree("getTree").visit(function(n){
+                                        n.setExpanded(false);
+                                      });
+                                   });');
+    end if;
+                               
+    --open a cursor to get the nr of columns and column names                           
+    v_cursor_id := dbms_sql.open_cursor;
+    dbms_sql.parse(v_cursor_id, p_region.source, dbms_sql.native);
+    dbms_sql.describe_columns(v_cursor_id, v_col_cnt, v_columns);
+    dbms_output.put_line(v_columns.count);
+    n := v_columns.count;                            
+    number_of_rows := n;
+    if p_region.attribute_22 = 'Y' then
+        l_html := '<table id="tree' || regionid || '" cellpadding="5">
+            <colgroup>
+                <col width="30px"></col>
+                <col width="*"></col>
+            </colgroup>
+            <thead>
+              <tr>
+                  <th>#</th> <th></th>';
+        for i in 8 .. v_columns.count loop
+            --get the column names from the query
+            l_html := l_html || '<th> ' || v_columns(i).col_name || '</th>';
+        end loop;
+
+        l_html := l_html || '</tr></thead>
+            <tbody>
+            </tbody></table>';
+    else
+        l_html := '<div id="tree' || regionid || '"></div>';
+    end if;
+    
+    -- add filler columns to the query so that it fits the record
+    -- If this is not done, the amount of rows the query returns might not be the number of columns the record has
+    while n < 16
+    loop
+        --replace all occurrences of FROM with all capitalizations
+        l_stmt := regexp_replace(l_stmt, 'from|From|fRom|frOm|froM|FRom|FrOm|FroM|fROm|fRoM|frOM|FROm|FrOM|fROM|FROM', ', ''Filler'' as "filler' || n || '" from', instr(lower(l_stmt), 'from', -1));
+        n := n + 1;
+    end loop;
+    dbms_sql.close_cursor(v_cursor_id);
+    --init query and json buffer, exec query   
+    l_thing_to_execute := 'select * from (' || l_stmt || ') where lvl <= 1';
+    -- use apex_json to create valid JSON
+    apex_json.initialize_clob_output;
+    apex_json.open_array;
+    -- open cursor 
+    open mycur for l_thing_to_execute;
+    loop
+        FETCH mycur INTO l_mytype;
+        EXIT WHEN mycur%NOTFOUND or mycur%NOTFOUND is null;
+        apex_json.open_object;
+        apex_json.write('key', apex_escape.html(l_mytype.value));
+        apex_json.write('title', apex_escape.html(l_mytype.name));
+        apex_json.write('tooltip', l_mytype.tooltip);
+        apex_json.write('icon', l_mytype.icon);
+        apex_json.write('link', l_mytype.link);
+        -- store the custom data, custom data is accessible in JavaScript by node.data.PROPERTY, e.g. node.data.custom1
+        -- it only stores the value for the row, not the column header, thus the property name is irrelevant
+        apex_json.write('custom1', NVL(l_mytype.custom1, ' '));
+        apex_json.write('custom2', NVL(l_mytype.custom2, ' '));
+        apex_json.write('custom3', NVL(l_mytype.custom3, ' '));
+        apex_json.write('custom4', NVL(l_mytype.custom4, ' '));
+        apex_json.write('custom5', NVL(l_mytype.custom5, ' '));
+        apex_json.write('custom6', NVL(l_mytype.custom6, ' '));
+        apex_json.write('custom7', NVL(l_mytype.custom7, ' '));
+        apex_json.write('custom8', NVL(l_mytype.custom8, ' '));
+        apex_json.write('custom9', NVL(l_mytype.custom9, ' '));
+        apex_json.write('parent', l_mytype.parent_id);
+        --check if the node has children. returns 1 if true, 0 if false
+        l_thing_to_execute := ' SELECT cnt FROM (
+            SELECT 1 cnt FROM (' || l_stmt || ') where parent_id = ''' || l_mytype.value || ''' UNION SELECT 0 cnt FROM DUAL ORDER BY cnt DESC ) WHERE ROWNUM = 1';
+        execute immediate l_thing_to_execute into n;
+        if n = 1 then
+            apex_json.write('lazy', 'true');   
+        end if;
+        apex_json.close_object;     
+    end loop;
+    apex_json.close_all;
+    l_json := apex_json.get_clob_output;
+    apex_json.free_output;
+    sys.htp.p(l_html);
+    -- add all css files
+    apex_css.add_file(
+        p_name      => 'ui.fancytree.min',
+        p_directory => p_plugin.file_prefix,
+        p_version        => null
+    );
+    apex_css.add_file(
+        p_name      => 'apex-icons',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null
+    );
+    
+    -- add all javascript files
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.min',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null ); 
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.dnd',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.edit',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'js.cookie-2.1.4.min',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );    
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.persist',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.table',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.filter',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );    
+    apex_javascript.add_library (
+        p_name      => 'jquery-ui.min',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'jquery.fancytree.contextMenu',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+    apex_javascript.add_library (
+        p_name      => 'jquery.ui-contextmenu',
+        p_directory => p_plugin.file_prefix,
+        p_version   => null );
+        
+    -- only add table & persist extension if needed
+    if p_region.attribute_22 = 'Y' then
+        l_ext := '["dnd", "edit", "filter", "table"';
+    else
+        l_ext := '["dnd", "edit", "filter"';
+    end if;
+    
+    if p_region.attribute_23 = 'Y' then
+        l_ext := l_ext || ', "persist"';
+    end if;
+    l_ext := l_ext || ']';
+    -- build functionality for the tree
+    l_tree := '$("#tree' || regionid || '").fancytree({';
+    if p_region.attribute_24 = 'Y' then
+        --add checkbox if wanted
+        l_tree := l_tree || 'checkbox: true,';
+    end if;
+    --Build the rest of the tree
+    l_tree := l_tree || '
+                                    selectMode: 3,
+                                    clickFolderMode: 2,
+                                    expandLazy: true,
+                                    quicksearch: true,
+                                    source: ' || l_json || ',
+                                    extensions: ' || l_ext || ',
+                                    
+                                    persist: {
+                                        cookiePrefix: ' || :APP_ID || :APP_PAGE_ID || regionid || ', //unique storage identifier for every tree
+                                        expandLazy: true, //needed because of lazy loading
+                                        store: "auto", //try sessionStorage, otherwise cookies
+                                        types: "expanded" //only store expanded state
+                                    },
+                                    table: {
+                                      nodeColumnIdx: 1,     // title in 2nd col
+                                    },
+                                    loadChildren: function(event, ctx) {
+                                        //if a parent node is checked and children are loaded, also check the children & update page item
+                                        ctx.node.fixSelection3AfterClick();
+                                        var selKeys = $("#tree' || regionid || '").fancytree("getTree").getSelectedNodes();
+                                        var selKeys2 = $.map(selKeys, function(node){
+                                          return node.key;
+                                        });
+                                        $s("' || p_region.attribute_25 || '", selKeys2.join(", "));
+                                    },
+                                    renderColumns: function(event, data) {
+                                        var node = data.node,
+                                        $tdList = $(node.tr).find(">td");
+                                        $tdList.eq(0).text(node.getIndexHier()).addClass("alignRight");
+                                        var customData = node.data;
+                                        for (i = 1; i <= ' || NVL(number_of_rows, 0) || '; i++) {
+                                            $tdList.eq(i+1).text(customData[Object.keys(customData)[i-1]]);
+                                        }                                      
+                                    }, 
+                                    
+                                    lazyLoad: function(event, data){
+                                        var node = data.node;                                          
+                                        data.result = {
+                                            url: apex.server.pluginUrl ("' || apex_plugin.get_ajax_identifier || '", {
+                                                        x01: node.key, x03: ' || n || '}),
+                                            data: {mode: "children", parent: node.key},
+                                            cache: false                
+                                        };
+                                      },
+                                    edit: {
+                                      triggerStart: ["f2", "shift+click", "mac+enter"],
+                                      beforeEdit: function(event, data){
+                                        // Return false to prevent edit mode
+                                        if ("' || p_region.attribute_20 || '" == "Y") {
+                                            if ("' || p_region.attribute_18 || '" == "Y") {
+                                                   if ($("input[name=''mode' || regionid || ''']:checked").val() == "Edit") {
+                                                       return true;
+                                                   } else {
+                                                       return false;
+                                                   }
+                                               } else {
+                                                   return true;
+                                               }
+                                            return true;
+                                        } else {
+                                            return false;
+                                        }
+                                      },
+                                      save: function(event, data){
+                                        console.log("save...", this, data);
+                                        return true;
+                                      },
+                                      close: function(event, data){
+                                        // Editor was removed
+                                        if( data.save ) {
+                                          $(data.node.span).addClass("pending");
+                                          apex.event.trigger("#tree' || regionid || '", "saveevent");
+                                        }
+                                      }
+                                    },
+                                    
+                                    dblclick: function(event, data) {
+                                        if (data.targetType != "expander" && data.targetType != "checkbox" && data.node.data.link) {
+                                            window.open(data.node.data.link, data.node.data.target);
+                                        }
+                                    },
+                                    
+                                    click: function(event, data) {
+                                        if (($("input[name=''mode' || regionid || ''']:checked").val() == "View" || "' || p_region.attribute_17 || '" == "N" ) && event.which == 1 && data.targetType != "expander" && data.targetType != "checkbox") {
+                                            if (data.node.data.link) {
+                                                window.open(data.node.data.link, data.node.data.target);
+                                            }
+                                        }
+                                        if ("' || p_region.attribute_20 || '" == "Y" && data.targetType == "title") {
+                                            data.node.editStart();
+                                        }
+                                        console.log(data.node);
+                                    },
+                                    
+                                    select: function(event, data) {
+                                        var selKeys = $.map(data.tree.getSelectedNodes(), function(node){
+                                          return node.key;
+                                        });
+                                        $s("' || p_region.attribute_25 || '", selKeys.join(", "));
+                                    },
+                                    activate: function(event, data){
+                                        var node = data.node;
+                                        $s("' || p_region.attribute_05 || '", node.key);
+                                        $s("' || p_region.attribute_06 || '", node.getParent().key);
+                                        $s("' || p_region.attribute_07 || '", node.getParent().key);
+                                    },
+                                    
+                                    dnd: {
+                                        preventVoidMoves: true,
+                                        preventRecursiveMoves: true,
+                                        dragStart: function(node, data) {
+                                          /** 
+                                           *  Return false to cancel dragging of node.
+                                           */
+                                           $s("' || p_region.attribute_05 ||'", node.key);
+                                           $s("' || p_region.attribute_07 ||'", node.getParent().key);
+                                           if ("' || p_region.attribute_17 || '" == "Y") {
+                                               if ("' || p_region.attribute_18 || '" == "Y") {
+                                                   if ($("input[name=''mode' || regionid || ''']:checked").val() == "Edit") {
+                                                       return true;
+                                                   } else {
+                                                       return false;
+                                                   }
+                                               } else {
+                                                   return true;
+                                               } 
+                                           } else {
+                                               return false;
+                                           }
+                                                
+                                        },
+                                        dragEnter: function(node, data) {
+                                          /** 
+                                           *  Return false to disallow dropping on node. In this case
+                                           *  dragOver and dragLeave are not called.
+                                           *  Return "over", "before, or "after" to force a hitMode.
+                                           *  Return ["before", "after"] to restrict available hitModes.
+                                           */
+                                            return true;
+                                        },
+                                        dragDrop: function(node, data) {
+                                          /** This function MUST be defined to enable dropping of items on
+                                           *  the tree.
+                                           */
+                                           var anon = function(node, data, otherNode) {
+                                                if ("' || p_region.attribute_17 || '" == "Y") {
+                                                    otherNode.moveTo(node, data.hitMode);
+                                                }
+                                                if(data.hitMode === "over") {
+                                                    $s("' || p_region.attribute_06 || '", node.key);
+                                                } else {
+                                                    $s("' || p_region.attribute_06 || '", node.getParent().key);
+                                                }
+                                                //the following line expands the parent, not the child
+                                                node.setExpanded();
+                                                //Only trigger when parent changes
+                                                if ($v(' || p_region.attribute_06 || ') != $v('|| p_region.attribute_07 || ') && "' || p_region.attribute_17 || '" == "Y") {
+                                                    apex.event.trigger("#tree' || regionid || '", "dropped");
+                                                }  
+                                            }
+                                            if (data.node.isLazy()) {
+                                               data.node.load().then(function(n) {
+                                                   if (data.otherNode.isLazy() && !data.otherNode.isLoaded()) {
+                                                       data.otherNode.load(true).then(function(n){
+                                                           anon(node, data, data.otherNode);
+                                                       });
+                                                   } else {
+                                                       anon(node, data, data.otherNode);
+                                                   };
+                                               });
+                                               return;
+                                           } else {
+                                               anon(node, data, data.otherNode);
+                                           };
+                                        }
+                                    },                                
+                                });';
+    apex_javascript.add_inline_code(l_tree);
+    
+    if p_region.attribute_16 = 'Y' then
+        -- build the context menu by concatenating a string
+        l_menu := '$("#tree' || regionid || '").contextmenu({
+                delegate: "span.fancytree-title",
+                autoFocus: true,
+                menu: [' ;
+
+        -- add the options as selected by the custom attributes
+        if p_region.attribute_02 = 'Y' then
+            l_menu := l_menu || '{title: "' || p_region.attribute_09 || '", cmd: "add", uiIcon: "' || p_region.attribute_12 || '"},';
+        end if;
+        if p_region.attribute_03 = 'Y' then
+            l_menu := l_menu || '{title: "' || p_region.attribute_10 || '", cmd: "edit", uiIcon: "' || p_region.attribute_13 || '"},';
+        end if;
+        if p_region.attribute_04 = 'Y' then
+            l_menu := l_menu || '{title: "' || p_region.attribute_11 || '", cmd: "delete", uiIcon: "' || p_region.attribute_14 || '"},';
+        end if;
+        l_menu := l_menu || '],
+            beforeOpen: function(event, ui) {
+                var node = $.ui.fancytree.getNode(ui.target);
+                node.setActive();
+                ui.menu.prevKeyboard = node.tree.options.keyboard;
+                node.tree.options.keyboard = false;
+            },
+            callback: function(event, ui) {
+                var node = $.ui.fancytree.getNode(ui.target);
+                node.tree.options.keyboard = ui.menu.prevKeyboard;
+                node.setFocus();
+            },
+            select: function (event, ui) {
+                if (ui.cmd === "add") {
+                    apex.event.trigger("#tree' || regionid || '", "addevent");
+                } else if (ui.cmd === "delete") {
+                    apex.event.trigger("#tree' || regionid || '", "deleteevent");
+                } else if (ui.cmd === "edit") {
+                    apex.event.trigger("#tree' || regionid || '", "editevent");
+                }
+            }
+            });';
+            apex_javascript.add_inline_code(l_menu); 
+    end if;
+    
+    apex_javascript.add_inline_code('$("input[name=search' || regionid || ']").keyup(function(e){
+      var n,
+        tree = $("#tree' || regionid || '").fancytree("getTree"),
+        args = "autoApply autoExpand fuzzy hideExpanders highlight leavesOnly nodata".split(" "),
+        opts = {},
+        filterFunc = tree.filterNodes,
+        match = $(this).val();
+
+      $.each(args, function(i, o) {
+        opts[o] = $("#" + o).is(":checked");
+      });
+      opts.mode = $("#hideMode").is(":checked") ? "hide" : "dimm";
+
+      if(e && e.which === $.ui.keyCode.ESCAPE || $.trim(match) === ""){
+          $("input[name=search' || regionid || ']").val("");
+          $("span#matches' || regionid || '").text("");
+          tree.clearFilter();
+        return;
+      }
+      // Pass a string to perform case insensitive matching
+      n = filterFunc.call(tree, match, opts);
+      $("button#btnResetSearch' || regionid || '").attr("disabled", false);
+      $("span#matches' || regionid || '").text("(" + n + " matches)");
+      }).focus();
+      $("button#btnResetSearch' || regionid || '").click(function(e){
+          $("input[name=search' || regionid || ']").val("");
+          $("span#matches' || regionid || '").text("");
+          $("#tree' || regionid || '").fancytree("getTree").clearFilter();
+      }).attr("disabled", true);');
+                     
+     
+    return null;
+EXCEPTION 
+    WHEN NO_DATA_FOUND THEN
+        sys.htp.p('NO DATA FOUND');
+        return null;
+    WHEN OTHERS THEN
+        sys.htp.p(sqlerrm);
+        return null;
+END;
+
+function ajax_getchildren (
+  p_region in apex_plugin.t_region,
+  p_plugin         in apex_plugin.t_plugin 
+) return apex_plugin.t_region_ajax_result
+is
+    v_result apex_plugin.t_region_ajax_result ;
+    l_parent VARCHAR2(32000) := apex_application.g_x01; 
+    l_stmt varchar2(32767) := apex_application.g_x02;
+    n pls_integer := apex_application.g_x03;
+    mycur SYS_REFCURSOR;
+    TYPE rec IS RECORD (value varchar2(50),
+                         name VARCHAR2(2000),
+                         tooltip VARCHAR2(100),
+                         icon VARCHAR2(100),
+                         link VARCHAR2(100),
+                         lvl number,
+                         parent_id varchar2(100),
+                         custom1 VARCHAR2(100),
+                         custom2 VARCHAR2(100),
+                         custom3 VARCHAR2(100),
+                         custom4 VARCHAR2(100),
+                         custom5 VARCHAR2(100),
+                         custom6 VARCHAR2(100),
+                         custom7 VARCHAR2(100),
+                         custom8 VARCHAR2(100),
+                         custom9 VARCHAR2(100)
+                         );
+    l_mytype rec;
+    l_json CLOB;
+    l_query varchar2(32767);
+    l_check_children varchar2(2000);
+    l_cnt pls_integer := 0;
+    v_cursor_id integer;
+    v_col_cnt integer;
+    v_columns dbms_sql.desc_tab;
+begin
+    l_stmt := p_region.source;
+    
+    v_cursor_id := dbms_sql.open_cursor;
+    dbms_sql.parse(v_cursor_id, p_region.source, dbms_sql.native);
+    dbms_sql.describe_columns(v_cursor_id, v_col_cnt, v_columns);
+    dbms_output.put_line(v_columns.count);
+    dbms_sql.close_cursor(v_cursor_id);
+    n := v_columns.count;
+    while n < 16
+    loop
+        l_stmt := regexp_replace(l_stmt, 'from|From|fRom|frOm|froM|FRom|FrOm|FroM|fROm|fRoM|frOM|FROm|FrOM|fROM|FROM', ', ''Filler'' as "filler' || n || '" from', instr(lower(l_stmt), 'from', -1));
+        n := n + 1;
+    end loop;
+    
+    l_query := 'select * from (' || l_stmt || ') where parent_id = ''' || l_parent || '''';
+    apex_json.initialize_clob_output;
+    apex_json.open_array;
+    execute immediate l_query;
+    -- open cursor 
+    open mycur for l_query;
+    loop
+        FETCH mycur INTO l_mytype;
+        EXIT WHEN mycur%NOTFOUND or mycur%NOTFOUND is null;
+        apex_json.open_object;
+        apex_json.write('key', l_mytype.value);
+        apex_json.write('title', apex_escape.html(l_mytype.name));
+        apex_json.write('tooltip', l_mytype.tooltip);
+        apex_json.write('icon', l_mytype.icon);
+        apex_json.write('link', l_mytype.link);
+        apex_json.write('custom1', NVL(l_mytype.custom1, ' '));
+        apex_json.write('custom2', NVL(l_mytype.custom2, ' '));
+        apex_json.write('custom3', NVL(l_mytype.custom3, ' '));
+        apex_json.write('custom4', NVL(l_mytype.custom4, ' '));
+        apex_json.write('custom5', NVL(l_mytype.custom5, ' '));
+        apex_json.write('custom6', NVL(l_mytype.custom6, ' '));
+        apex_json.write('custom7', NVL(l_mytype.custom7, ' '));
+        apex_json.write('custom8', NVL(l_mytype.custom8, ' '));
+        apex_json.write('custom9', NVL(l_mytype.custom9, ' '));
+        apex_json.write('parent', l_mytype.parent_id);
+        l_check_children := ' SELECT cnt FROM (
+            SELECT 1 cnt FROM (' || l_stmt || ') where parent_id = ''' || l_mytype.value || ''' UNION SELECT 0 cnt FROM DUAL ORDER BY cnt DESC ) WHERE ROWNUM = 1';
+        execute immediate l_check_children into l_cnt;
+        if l_cnt = 1 then
+            apex_json.write('lazy', 'true');
+        end if;
+        apex_json.close_object;       
+    end loop;
+    apex_json.close_array;
+    l_json := apex_json.get_clob_output;
+    apex_json.free_output;
+    sys.htp.p(l_json);
+   return v_result;
+EXCEPTION
+    WHEN OTHERS THEN
+        sys.htp.p(sqlerrm);
+end;
