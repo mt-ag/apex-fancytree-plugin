@@ -6,12 +6,12 @@
   "homepage" : "https://github.com/mt-ag/apex-fancytree-plugin",
   "bugs" : {
     "url" : "https://github.com/mt-ag/apex-fancytree-plugin/issues",
-    "email" : "alexander.warkus@mt-ag.com"
+    "email" : "apexteam@mt-ag.com"
   },
   "license" : "MIT",
   "author" : {
     "name" : "Alexander Warkus",
-    "email" : "alexander.warkus@mt-ag.com",
+    "email" : "apexteam@mt-ag.com",
     "url" : "https://apex.mt-ag.com/home",
     "twitter" : "alwarkus",
   },
